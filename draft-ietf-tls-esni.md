@@ -112,28 +112,7 @@ comes from {{RFC8446}}; Section 3.
 
 # Overview
 
-This document is designed to operate in one of two primary topologies
-shown below, which we call "Shared Mode" and "Split Mode"
-
-## Topologies
-
-~~~~
-                +---------------------+
-                |                     |
-                |   2001:DB8::1111    |
-                |                     |
-Client <----->  | private.example.org |
-                |                     |
-                | public.example.com  |
-                |                     |
-                +---------------------+
-                        Server
-~~~~
-{: #shared-mode title="Shared Mode Topology"}
-
-In Shared Mode, the provider is the origin server for all the domains
-whose DNS records point to it and clients form a TLS connection directly
-to that provider, which has access to the plaintext of the connection.
+This document is designed to operate in the topology shown below.
 
 ~~~~
                 +--------------------+       +---------------------+
@@ -143,37 +122,37 @@ Client <------------------------------------>|                     |
                 | public.example.com |       | private.example.com |
                 |                    |       |                     |
                 +--------------------+       +---------------------+
-                  Client-Facing Server            Backend Server
+                 Client-Facing Server             Backend Server
 ~~~~
-{: #split-mode title="Split Mode Topology"}
+{: #topology title="Topology"}
 
-In Split Mode, the provider is *not* the origin server for private
-domains. Rather the DNS records for private domains point to the provider,
-but the provider's server just relays the connection back to the
-backend server, which is the true origin server. The provider does
-not have access to the plaintext of the connection. In principle,
-the provider might not be the origin for any domains, but as
-a practical matter, it is probably the origin for a large set of
-innocuous domains, but is also providing protection for some private
-domains. Note that the backend server can be an unmodified TLS 1.3
-server.
+The client-facing server acts as a proxy between the client and the backend
+server. It unprotects the partially-encrypted ClientHello sent by the client
+(see {{esni-transformation}}), and forwards the reconstructed ClientHello as
+well as the following TLS records to the backend server, which is identified
+during the unprotection transformation. The client-facing server is also
+responsible for providing the up-to-date ESNI keys should there be a mismatch
+(see {{server-behavior}}).
 
+The backend server can be a stock TLS 1.3 server.
+
+The client-facing server and the backend server can be collocated. When they are
+not, the communication between these two servers MUST be encrypted (e.g., by
+using VPN) so that it would be unobservable by a third party.
 
 ## SNI Encryption
 
 First, the provider publishes a public key and metadata which is used for SNI
-encryption for all the domains for which it serves directly or indirectly (via
-Split Mode). This document defines a publication mechanism using DNS, but other
-mechanisms are also possible. In particular, if some of the clients of a private
-server are applications rather than Web browsers, those applications might have
-the public key and metadata preconfigured.
+encryption for all the domains for which it serves or proxies. This document
+defines a publication mechanism using DNS, but other mechanisms are also
+possible. In particular, if some of the clients of a private server are
+applications rather than Web browsers, those applications might have the public
+key and metadata preconfigured.
 
-When a client wants to form a TLS connection to any of the domains
-served by an ESNI-supporting provider, it sends an "encrypted_server_name"
-extension, which contains the true extension encrypted under the
-provider's public key. The provider can then decrypt the extension
-and either terminate the connection (in Shared Mode) or forward
-it to the backend server (in Split Mode).
+When a client wants to form a TLS connection to any of the domains served or
+proxied by an ESNI-supporting provider, it sends an "encrypted_server_name"
+extension, which contains the true server name encrypted under the provider's
+public key. The provider can then decrypt the encrypted server name.
 
 # Publishing the SNI Encryption Key in the DNS {#publishing-key}
 
@@ -186,17 +165,17 @@ refers is not in possession of the ESNI keys.) The design of the system must
 therefore allow clients to detect and recover from this situation (see
 {{esni-resolution}} for more details).
 
-Content providers operating in Split Mode SHOULD ensure that the A and AAAA
-records for ESNI-enabled server names do not allow identifying the server name
-from the IP address. This can for example be achieved by always returning the
-same records for all ESNI-enabled names, or by having the function that picks
-addresses from a pool not depend on the server name. This yields
-an anonymity set of cardinality equal to the number of ESNI-enabled server domains
-supported by a given client-facing server. Thus, even with SNI encryption,
-an attacker which can enumerate the set of ESNI-enabled domains supported
-by a client-facing server can guess the correct SNI with probability at least
-1/K, where K is the size of this ESNI-enabled server anonymity set. This probability
-may be increased via traffic analysis or other mechanisms.
+Content providers SHOULD ensure that the A and AAAA records for ESNI-enabled
+server names do not allow identifying the server name from the IP address. This
+can for example be achieved by always returning the same records for all
+ESNI-enabled names, or by having the function that picks addresses from a pool
+not depend on the server name. This yields an anonymity set of cardinality equal
+to the number of ESNI-enabled server domains supported by a given client-facing
+server. Thus, even with SNI encryption, an attacker which can enumerate the set
+of ESNI-enabled domains supported by a client-facing server can guess the
+correct SNI with probability at least 1/K, where K is the size of this
+ESNI-enabled server anonymity set. This probability may be increased via traffic
+analysis or other mechanisms.
 
 The following sections describe a DNS record format that achieve these goals.
 
@@ -384,7 +363,25 @@ arrives in this time, clients SHOULD initiate TLS without ESNI to the available 
 CD (Connection Delay) is a configurable parameter. The recommended value is 50 milliseconds,
 as per the guidance in {{!RFC8305}}.
 
-# The "encrypted_server_name" extension {#esni-extension}
+# Changes to the TLS 1.3 Handshake
+
+TLS 1.3 is a two-layer protocol. The handshake protocol authenticates the
+communicating parties, negotiates cryptographic modes and parameters, and
+establishes shared keying material. The record protocol chunks the messages
+supplied by the handshake protocol and protects them.
+
+This document defines a transformation layer between these two protocols.  This
+transformation layer protects the ClientHello, by encrypting the server name and
+authenticating the rest using the ESNI keys.  Delivery of the untampered
+ClientHello is attested by including the pre-transformed form of the ClientHello
+into the handshake transcript.
+
+The transformation process is designed so that the TLS handshake would also
+succeed by using the public name, when the server does not understand the
+Encrypted SNI extension or when it does not have the private keys corresponding
+to the ESNI keys used by the client (see {{auth-public-name}}).
+
+## The "encrypted_server_name" extension {#esni-extension}
 
 The encrypted SNI is carried in an "encrypted_server_name"
 extension, defined as follows:
@@ -399,13 +396,25 @@ For clients (in ClientHello), this extension contains the following
 ClientEncryptedSNI structure:
 
 ~~~~
+   enum {
+       esni_parameters(0),
+       esni_encrypted(1)
+   } ClientESNIType;
+
    struct {
+       ClientESNIType type;
        CipherSuite suite;
        KeyShareEntry key_share;
        opaque record_digest<0..2^16-1>;
-       opaque encrypted_sni<0..2^16-1>;
+       select (type) {
+           case esni_parameters: uint8 nonce[16];
+           case esni_encrypted: opaque encrypted_sni<0..2^16-1>;
+       }
    } ClientEncryptedSNI;
 ~~~~
+
+type
+: The type of the structure.
 
 suite
 : The cipher suite used to encrypt the SNI.
@@ -420,39 +429,26 @@ key was obtained, i.e., from the first byte of "version" to the end
 of the structure.  This hash is computed using the hash function
 associated with `suite`.
 
+nonce
+: A random 16-byte value. Inclusion of this field in the handshake transcript
+guarantees that the client-facing server has received the ClientHello sent by
+the client.
+
 encrypted_sni
 : The ClientESNIInner structure, AEAD-encrypted using cipher suite "suite" and
 the key generated as described below.
 {:br}
 
-For servers (in EncryptedExtensions), this extension contains the following
-structure:
+For servers (in EncryptedExtensions), this extension contains one or more
+ESNIKeys structures containing the keys that the client should use on subsequent
+connections to encrypt the ClientESNIPlaintext structure (see
+{{handle-server-response}} and {{server-behavior}}).
 
 ~~~
-   enum {
-       esni_accept(0),
-       esni_retry_request(1),
-   } ServerESNIResponseType;
-
    struct {
-       ServerESNIResponseType response_type;
-       select (response_type) {
-           case esni_accept:        uint8 nonce[16];
-           case esni_retry_request: ESNIKeys retry_keys<1..2^16-1>;
-       }
+       ESNIKeys retry_keys<1..2^16-1>;
    } ServerEncryptedSNI;
 ~~~
-
-response_type
-: Indicates whether the server processed the client ESNI extension. (See
-{{handle-server-response}} and {{server-behavior}}.}
-
-nonce
-: The contents of ClientESNIInner.nonce. (See {{client-behavior}}.)
-
-retry_keys
-: One or more ESNIKeys structures containing the keys that the client should use on
-subsequent connections to encrypt the ClientESNIInner structure.
 
 This protocol also defines the "esni_required" alert, which is sent by the
 client when it offered an "encrypted_server_name" extension which was not
@@ -464,21 +460,11 @@ accepted by the server.
    } AlertDescription;
 ~~~~
 
-Finally, requirements in {{client-behavior}} and {{server-behavior}} require
-implementations to track, alongside each PSK established by a previous
-connection, whether the connection negotiated this extension with the
-"esni_accept" response type. If so, this is referred to as an "ESNI PSK".
-Otherwise, it is a "non-ESNI PSK". This may be implemented by adding a new field
-to client and server session states.
-
-
 ## Client Behavior {#client-behavior}
 
-### Sending an encrypted SNI {#send-esni}
-
-In order to send an encrypted SNI, the client MUST first select one of
-the server ESNIKeyShareEntry values and generate an (EC)DHE share in the
-matching group. This share will then be sent to the server in the
+In order to initiate a TLS handshake using encrypted SNI, the client MUST first
+select one of the server ESNIKeyShareEntry values and generate an (EC)DHE share
+in the matching group. This share will then be sent to the server in the
 "encrypted_sni" extension and used to derive the SNI encryption key. It does not affect the
 (EC)DHE shared secret used in the TLS key schedule. It MUST also select
 an appropriate cipher suite from the list of suites offered by the
@@ -488,9 +474,42 @@ by the server. (Recall that servers might provide multiple ESNIRecord values in 
 to a ESNI record query, each containing an ESNIKeys value.) The client MUST NOT send encrypted SNI using groups or
 cipher suites not advertised by the server.
 
-When offering an encrypted SNI, the client MUST NOT offer to resume any non-ESNI
-PSKs. It additionally MUST NOT offer to resume any sessions for TLS 1.2 or
-below.
+When offering an encrypted SNI, the client MUST NOT offer a session ticket
+obtained through a non-ESNI TLS session. It additionally MUST NOT offer to
+resume any sessions for TLS 1.2 or below.
+
+### Generating ClientHello {#generate-clienthello}
+
+The client then builds the first ClientHello, that has the following properties:
+
+* Contains a "server_name" extension that carries the true SNI DNS name in
+  cleartext.
+* Immediately following the "server_name" extension, contains an
+  "encrypted_server_name" extension carrying the ClientEncryptedSNI structure of
+  type `esni_parameters`.
+
+The client MUST NOT send a "cached_info" extension {{!RFC7924}} with a
+CachedObject entry whose CachedInformationType is "cert".
+
+A ClientHello generated in response to a HelloRetryRequest MUST contain a
+"server_name" extension carrying the public name.  This message MUST NOT contain
+an "encrypted_server_name" extension.
+
+These ClientHellos are fed into the Transcript Hash ({{RFC8446}}; Section
+4.4.1).
+
+### ESNI Transformation {#esni-transformation}
+
+Then, before submitting the first ClientHello to the record protocol, the client
+transforms the ClientHello by replacing the aforementioned two extensions with
+the following pair:
+
+* A "server_name" extension that contains ESNIKeys.public_name.
+* Immediately following the "server_name" extension, an "encrypted_server_name"
+  extension carrying the ClientEncryptedSNI structure of type `esni_encrypted`.
+
+The key and the IV used for encrypting the payload of the
+"encrypted_server_name" extension is calculated as follows.
 
 Let Z be the DH shared secret derived from a key share in ESNIKeys and the
 corresponding client share in ClientEncryptedSNI.key_share. The SNI encryption key is
@@ -498,22 +517,13 @@ computed from Z as follows:
 
 ~~~~
    Zx = HKDF-Extract(0, Z)
-   key = HKDF-Expand-Label(Zx, KeyLabel, Hash(ESNIContents), key_length)
-   iv = HKDF-Expand-Label(Zx, IVLabel, Hash(ESNIContents), iv_length)
+   key = HKDF-Expand-Label(Zx, "esni key", Hash(ESNIContents), key_length)
+   iv = HKDF-Expand-Label(Zx, "esni iv", Hash(ESNIContents), iv_length)
 ~~~~
 
 where ESNIContents is as specified below and Hash is the hash function
 associated with the HKDF instantiation. The salt argument for HKDF-Extract is a
-string consisting of Hash.length bytes set to zeros. For a client's first
-ClientHello, KeyLabel = "esni key" and IVLabel = "esni iv", whereas for a
-client's second ClientHello, sent in response to a HelloRetryRequest,
-KeyLabel = "hrr esni key" and IVLabel = "hrr esni iv". (This label variance
-is done to prevent nonce re-use since the client's ESNI key share, and
-thus the value of Zx, does not change across ClientHello retries.)
-
-[[TODO: label swapping fixes a bug in the spec, though this may not be
-the best way to deal with HRR. See https://github.com/tlswg/draft-ietf-tls-esni/issues/121
-and https://github.com/tlswg/draft-ietf-tls-esni/pull/170 for more details.]]
+string consisting of Hash.length bytes set to zeros.
 
 ~~~
    struct {
@@ -538,8 +548,7 @@ The client then creates a ClientESNIInner structure:
 ~~~~
 
 nonce
-: A random 16-octet value to be echoed by the server in the
-"encrypted_server_name" extension.
+: Nonce being copied from the ESNI parameters generated above.
 
 dns_name
 : The true SNI DNS name, that is, the HostName value that would have been sent in the
@@ -562,13 +571,14 @@ The ClientEncryptedSNI.encrypted_sni value is then computed using the usual
 TLS 1.3 AEAD:
 
 ~~~~
-    encrypted_sni = AEAD-Encrypt(key, iv, KeyShareClientHello, ClientESNIInner)
+    encrypted_sni = AEAD-Encrypt(key, iv, Hash(ClientHelloPlaintext),
+                                 ClientESNIInner)
 ~~~~
 
-Where KeyShareClientHello is the "extension_data" field of the "key_share"
-extension in a Client Hello (Section 4.2.8 of {{!RFC8446}})). Including
-KeyShareClientHello in the AAD of AEAD-Encrypt binds the ClientEncryptedSNI
-value to the ClientHello and prevents cut-and-paste attacks.
+where ClientHelloPlaintext is the entire ClientHello to be transformed but the
+"server_name" extension being skipped.  Feeding the unencrypted part of the
+ClientHello in the AAD of AEAD-Encrypt binds the encrypted value to the prevents
+cut-and-paste attacks.
 
 Note: future extensions may end up reusing the server's ESNIKeyShareEntry
 for other purposes within the same message (e.g., encrypting other
@@ -580,55 +590,46 @@ reuse.
 expanding twice of Z_extracted. We should think about how
 to harmonize these to make sure that we maintain key separation.]]
 
-This value is placed in an "encrypted_server_name" extension.
-
-The client MUST place the value of ESNIKeys.public_name in the "server_name"
-extension. (This is required for technical conformance with {{!RFC7540}};
-Section 9.2.) The client MUST NOT send a "cached_info" extension {{!RFC7924}}
-with a CachedObject entry whose CachedInformationType is "cert".
+A ClientHello sent in response to a HelloRetryRequest MUST be transformed by
+replacing the content of the "server_name" extension from the true server name
+to the public name. The "encrypted_server_name" extension is not used.
 
 ### Handling the server response {#handle-server-response}
 
-If the server negotiates TLS 1.3 or above and provides an
-"encrypted_server_name" extension in EncryptedExtensions, the client
-then processes the extension's "response_type" field:
+When the negotiated version is TLS 1.3 and client receives the first encrypted
+record, it generates two traffic secrets: one using the ClientHello before the
+ESNI transformation as the handshake transcript, and the other using the
+ClientHello post ESNI transformation. One of these two traffic secrets is
+promoted to the handshake traffic secret using the following procedure.
 
-- If the value is "esni_accept", the client MUST check that the extension's
-  "nonce" field matches ClientESNIInner.nonce and otherwise abort the
-  connection with an "illegal_parameter" alert. The client then proceeds
-  with the connection as usual, authenticating the connection for the origin
-  server.
+If the encrypted record can be sucessfully decrypted using the former traffic
+secret, it means that the server has received and recognized the protected
+server name. Then, that traffic secret is promoted to the handshake traffic
+secret, and the handshake continues accordingly.
 
-- If the value is "esni_retry_request", the client proceeds with the handshake,
-  authenticating for ESNIKeys.public_name as described in
-  {{auth-public-name}}. If authentication or the handshake fails, the client
-  MUST return a failure to the calling application. It MUST NOT use the retry
-  keys.
+Otherwise, the latter traffic secret is promoted to the handshake traffic
+secret, as the server was unable to unwind the ESNI transformation.  The client
+then proceeds with the handshake, authenticating for ESNIKeys.public_name as
+described in {{auth-public-name}}.
 
-  Otherwise, when the handshake completes successfully with the public name
-  authenticated, the client MUST abort the connection with an "esni_required"
-  alert. It then processes the "retry_keys" field from the server's
-  "encrypted_server_name" extension.
+After the handshake successfully concludes with the public name authenticated,
+the client MUST check if it has received an "encrypted_server_name" extension as
+part of EncryptedExtensions. If one was found, the client can regard that the
+ESNI keys as securely replaced by the server.
 
-  If one of the values contains a version supported by the client, it can regard
-  the ESNI keys as securely replaced by the server. It SHOULD retry the
-  handshake with a new transport connection, using that value to encrypt the
-  SNI. The value may only be applied to the retry connection. The client
-  MUST continue to use the previously-advertised keys for subsequent
-  connections. This avoids introducing pinning concerns or a tracking vector,
-  should a malicious server present client-specific retry keys to identify
-  clients.
+Then, if the payload of that extension contains an ESNI keys that can be used by
+the client, then it SHOULD retry the handshake with a new transport connection,
+using that value to encrypt the SNI. The value may only be applied to the retry
+connection. The client MUST continue to use the previously-advertised keys for
+subsequent connections. This avoids introducing pinning concerns or a tracking
+vector, should a malicious server present client-specific retry keys to identify
+clients.
 
-  If none of the values provided in "retry_keys" contains a supported version,
-  the client can regard ESNI as securely disabled by the server. As below, it
-  SHOULD then retry the handshake with a new transport connection and ESNI
-  disabled.
+If none of the ESNI keys being provided is usable, the client can regard ESNI as
+securely disabled by the server. It SHOULD then retry the handshake with a new
+transport connection and ESNI disabled.
 
-- If the field contains any other value, the client MUST abort the connection
-  with an "illegal_parameter" alert.
-
-If the server negotiates an earlier version of TLS, or if it does not
-provide an "encrypted_server_name" extension in EncryptedExtensions, the
+If the server negotiates an earlier version of TLS or authentication fails, the
 client proceeds with the handshake, authenticating for
 ESNIKeys.public_name as described in {{auth-public-name}}. If an earlier
 version was negotiated, the client MUST NOT enable the False Start optimization
@@ -645,21 +646,10 @@ SHOULD retry the handshake with a new transport connection and ESNI disabled.
   servers bounce ESNI off. Is it worth defining a strict mode toggle in the ESNI
   keys, for a deployment to indicate it is ready for that? ]]
 
-Clients SHOULD implement a limit on retries caused by "esni_retry_request" or
-servers which do not acknowledge the "encrypted_server_name" extension. If the
-client does not retry in either scenario, it MUST report an error to the
-calling application.
-
-If the server sends a HelloRetryRequest in response to the ClientHello
-and the client can send a second updated ClientHello per the rules in
-{{RFC8446}}, the "encrypted_server_name" extension values which do not depend
-on the (possibly updated) KeyShareClientHello, i.e,,
-ClientEncryptedSNI.suite, ClientEncryptedSNI.key_share, and
-ClientEncryptedSNI.record_digest, MUST NOT change across ClientHello messages.
-Moreover, ClientESNIInner MUST not change across ClientHello messages.
-Informally, the values of all unencrypted extension information, as well as
-the inner extension plaintext, must be consistent between the first and
-second ClientHello messages.
+Clients SHOULD implement a limit on retries caused by the
+"encrypted_server_name" extension found in EncryptedExtensions or servers which
+do not acknowledge the "encrypted_server_name" extension. If the client does not
+retry in either scenario, it MUST report an error to the calling application.
 
 ### Authenticating for the public name {#auth-public-name}
 
@@ -670,10 +660,10 @@ authenticate the connection with the public name, as follows:
 
 - If the server resumed a session or negotiated a session that did not use a
   certificate for authentication, the client MUST abort the connection with an
-  "illegal_parameter" alert. This case is invalid because {{send-esni}} requires
-  the client to only offer ESNI-established sessions, and {{server-behavior}}
-  requires the server to decline ESNI-established sessions if it did not accept
-  ESNI.
+  "illegal_parameter" alert. This case is invalid because {{client-behavior}}
+  requires the client to only offer ESNI-established sessions, and
+  {{server-behavior}} requires the server to decline ESNI-established sessions
+  if it did not accept ESNI.
 
 - The client MUST verify that the certificate is valid for ESNIKeys.public_name.
   If invalid, it MUST abort the connection with the appropriate alert.
@@ -712,13 +702,6 @@ structure available for the server, it SHOULD send a GREASE
   16 + padded_length + tag_length bytes, where tag_length is the tag length
   of the chosen cipher suite's associated AEAD.
 
-If the server sends an "encrypted_server_name" extension, the client
-MUST check the extension syntactically and abort the connection with a
-"decode_error" alert if it is invalid. If the "response_type" field
-contains "esni_retry_requested", the client MUST ignore the extension
-and proceed with the handshake. If it contains "esni_accept" or any other
-value, the client MUST abort the connection with an "illegal_parameter" alert.
-
 Offering a GREASE extension is not considered offering an encrypted SNI for
 purposes of requirements in {{client-behavior}}. In particular, the client MAY
 offer to resume sessions established without ESNI.
@@ -726,12 +709,15 @@ offer to resume sessions established without ESNI.
 ## Client-Facing Server Behavior {#server-behavior}
 
 Upon receiving an "encrypted_server_name" extension, the client-facing
-server MUST check that it is able to negotiate TLS 1.3 or greater. If not,
-it MUST abort the connection with a "handshake_failure" alert.
+server MUST check that it is able to negotiate TLS 1.3 or greater, and that the
+extension is not contained in the ClientHello sent in response to a
+HelloRetryRequest. If not, it MUST abort the connection with a
+"handshake_failure" alert.
 
-The ClientEncryptedSNI value is said to match a known ESNIKeys if there exists
-an ESNIKeys that can be used to successfully decrypt ClientEncryptedSNI.encrypted_sni.
-This matching procedure should be done using one of the following two checks:
+The ClientEncryptedSNI value is said to match a known ESNIKeys if the type of
+the structure is `esni_encrypted` and if there exists an ESNIKeys that can be
+used to successfully decrypt ClientEncryptedSNI.encrypted_sni. This matching
+procedure should be done using one of the following two checks:
 
 1. Compare ClientEncryptedSNI.record_digest against cryptographic hashes of known ESNIKeys
 and choose the one that matches.
@@ -744,21 +730,19 @@ used for matching ClientEncryptedSNI to known ESNIKeys. Unless specified by the 
 using (D)TLS or externally configured on both sides, implementations MUST use the first method.
 
 If the ClientEncryptedSNI value does not match any known ESNIKeys
-structure, it MUST ignore the extension and proceed with the connection,
-with the following added behavior:
+structure, it MUST ignore the extension and proceed with the connection with the
+following added behavior:
 
-- It MUST include the "encrypted_server_name" extension in
-  EncryptedExtensions message with the "response_type" field set to
-  "esni_retry_requested" and the "retry_keys" field set to one or more
-  ESNIKeys structures with up-to-date keys. Servers MAY supply multiple
-  ESNIKeys values of different versions. This allows a server to support
-  multiple versions at once.
+- Send the ESNIKeys that the server recognizes, by including the
+  "encrypted_server_name" extension in EncryptedExtensions. Servers MAY supply
+  multiple ESNIKeys values of different versions. This allows a server to
+  support multiple versions at once.
 
-- The server MUST ignore all PSK identities in the ClientHello which correspond
-  to ESNI PSKs. ESNI PSKs offered by the client are associated with the ESNI
-  name. The server was unable to decrypt then ESNI name, so it should not resume
-  them when using the cleartext SNI name. This restriction allows a client to
-  reject resumptions in {{auth-public-name}}.
+- Ignore the session tickets offered by the client, as they are associated with
+  the encrypted server name. The server was unable to decrypt then encrypted
+  server name, so it should not resume them when using the cleartext SNI name.
+  This restriction allows a client to reject resumptions in
+  {{auth-public-name}}.
 
 Note that an unrecognized ClientEncryptedSNI.record_digest value may be
 a GREASE ESNI extension (see {{grease-extensions}}), so it is necessary
@@ -792,50 +776,21 @@ the "server_name" extension. Any actual "server_name" extension is
 ignored, which also means the server MUST NOT send the "server_name"
 extension to the client.
 
-Upon determining the true SNI, the client-facing server then either
-serves the connection directly (if in Shared Mode), in which case
-it executes the steps in the following section, or forwards
-the TLS connection to the backend server (if in Split Mode). In
-the latter case, it does not make any changes to the TLS
-messages, but just blindly forwards them.
+Upon determining the true SNI, the client-facing server reverses the
+transformation of the ClientHello as defined in {{esni-transformation}}, then
+forwards that recovered message to the backend server.  The reverse
+transformation MUST also be applied to the ClientHello sent in response to a
+HelloRetryRequest.
 
-If the ClientHello is the result of a HelloRetryRequest, servers MUST
-abort the connection with an "illegal_parameter" alert if any of the
-ClientEncryptedSNI.suite, ClientEncryptedSNI.key_share, ClientEncryptedSNI.record_digest,
-or decrypted ClientESNIInner values from the second ClientHello do not
-match that of the first ClientHello.
+## Backend Server Behavior {#backend-server-behavior}
 
-## Shared Mode Server Behavior
+The backend server SHOULD pad the Certificate message, via padding at the record
+layer, such that its length equals the size of the largest possible Certificate
+message covered by the same ESNI keys.
 
-A server operating in Shared Mode uses PaddedServerNameList.sni as
-if it were the "server_name" extension to finish the handshake. It
-SHOULD pad the Certificate message, via padding at the record layer,
-such that its length equals the size of the largest possible Certificate
-(message) covered by the same ESNI key. Moreover, the server MUST
-include the "encrypted_server_name" extension in EncryptedExtensions
-with the "response_type" field set to "esni_accept" and the "nonce"
-field set to the decrypted PaddedServerNameList.nonce value from the client
-"encrypted_server_name" extension.
-
-If the server sends a NewSessionTicket message, the corresponding ESNI PSK MUST
-be ignored by all other servers in the deployment when not negotiating ESNI,
-including servers which do not implement this specification.
-
-This restriction provides robustness for rollbacks (see {{misconfiguration}}).
-
-## Split Mode Server Behavior {#backend-server-behavior}
-
-In Split Mode, the backend server must know PaddedServerNameList.nonce
-to echo it back in EncryptedExtensions and complete the handshake.
-{{communicating-sni}} describes one mechanism for sending both
-PaddedServerNameList.sni and ClientESNIInner.nonce to the backend
-server. Thus, backend servers function the same as servers operating
-in Shared Mode.
-
-As in Shared Mode, if the backend server sends a NewSessionTicket message, the
-corresponding ESNI PSK MUST be ignored by other servers in the deployment when
-not negotiating ESNI, including servers which do not implement this
-specification.
+The backend server SHOULD ignore the "encrypted_server_name" extension of type
+`esni_parameters`, as the purpose of this parameters is to derive the handshake
+traffic secret from a handshake transcript invisible to an observer.
 
 # Compatibility Issues
 
@@ -1007,8 +962,8 @@ RECOMMENDED that servers rotate keys frequently.
 
 ### Proper security context
 
-This design permits servers operating in Split Mode to forward connections
-directly to backend origin servers, thereby avoiding unnecessary MiTM attacks.
+This design permits client-facing servers to forward connections directly to
+backend servers, thereby avoiding unnecessary MiTM attacks.
 
 ### Split server spoofing
 
@@ -1064,24 +1019,6 @@ registry for Resource Record (RR) TYPEs (defined in {{!RFC6895}}) with
 "Meaning" column value being set to "Encrypted SNI".
 
 --- back
-
-
-# Communicating SNI and Nonce to Backend Server {#communicating-sni}
-
-When operating in Split Mode, backend servers will not have access
-to PaddedServerNameList.sni or ClientESNIInner.nonce without
-access to the ESNI keys or a way to decrypt ClientEncryptedSNI.encrypted_sni.
-
-One way to address this for a single connection, at the cost of having
-communication not be unmodified TLS 1.3, is as follows.
-Assume there is a shared (symmetric) key between the
-client-facing server and the backend server and use it to AEAD-encrypt Z
-and send the encrypted blob at the beginning of the connection before
-the ClientHello. The backend server can then decrypt ESNI to recover
-the true SNI and nonce.
-
-Another way for backend servers to access the true SNI and nonce is by the
-client-facing server sharing the ESNI keys.
 
 # Alternative SNI Protection Designs
 
@@ -1153,9 +1090,6 @@ It also has the following disadvantages:
   contrast we could introduce another EncryptedExtensions
   block that was encrypted to the backend server and not
   the client-facing server.
-- It requires a mechanism for the client-facing server to provide the
-  extension-encryption key to the backend server (as in {{communicating-sni}}
-  and thus cannot be used with an unmodified backend server.
 - A conformant middlebox will strip every extension, which might
   result in a ClientHello which is just unacceptable to the server
   (more analysis needed).
