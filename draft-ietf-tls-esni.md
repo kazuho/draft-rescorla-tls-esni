@@ -129,10 +129,10 @@ Client                    |                 |    |                  |
 ~~~~
 {: #topology title="Topology"}
 
-Client sends a transformed ClientHello on the wire, that contains an encrypted
-server name (see {{esni-transformation}}). The client-facing server acts as a
-proxy between the client and the backend server, decrypting the server name sent
-by the client, and forwards the restored ClientHello as well as the the
+The client sends a transformed ClientHello on the wire, that contains an
+encrypted server name (see {{esni-transformation}}). The client-facing server
+acts as a proxy between the client and the backend server, decrypting the server
+name sent by the client, and forwards the restored ClientHello as well as the
 following TLS records to the backend server, which is identified during the
 inverse transformation. The client-facing server is also responsible for
 providing the up-to-date ESNI keys should there be a mismatch (see
