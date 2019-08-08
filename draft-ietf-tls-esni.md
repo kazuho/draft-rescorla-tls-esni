@@ -128,11 +128,11 @@ Client <------------------------------------>|                     |
 
 The client-facing server acts as a proxy between the client and the backend
 server. It unprotects the partially-encrypted ClientHello sent by the client
-(see {{esni-transformation}}), and forwards the reconstructed ClientHello as
-well as the following TLS records to the backend server, which is identified
-during the inverse transformation. The client-facing server is also responsible
-for providing the up-to-date ESNI keys should there be a mismatch
-(see {{server-behavior}}).
+(see {{esni-transformation}}), and forwards the restored ClientHello as well as
+the following TLS records to the backend server, which is identified during the
+inverse transformation. The client-facing server is also responsible for
+providing the up-to-date ESNI keys should there be a mismatch (see
+{{server-behavior}}).
 
 The backend server can be a stock TLS 1.3 server.
 
