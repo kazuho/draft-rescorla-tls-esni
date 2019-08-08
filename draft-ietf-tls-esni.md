@@ -115,17 +115,17 @@ comes from {{RFC8446}}; Section 3.
 This document is designed to operate in the topology shown below.
 
 ~~~~
-                          +-----------------+    +------------------+
-                          |                 |    |                  |
-                          | pub.example.com |    | priv.example.com |
-                          | (2001:DB8::111) |    | (2001:DB8::EEEE) |
-                          |                 |    |                  |
-       <---  TLS 1.3  -------------------------->|                  |
-Client                    |                 |    |                  |
-       <-  ESNI Trans-  ->|                 |    |                  |
-            formation     |                 |    |                  |
-                          +-----------------+    +------------------+
-                         Client-Facing Server       Backend Server
++----+                   +------------------+    +------------------+
+|    |                   |                  |    |                  |
+|    |                   | pub.example.com  |    | priv.example.com |
+|    |                   | (2001:DB8::1111) |    | (2001:DB8::EEEE) |
+|    |                   |                  |    |                  |
+|    |<---  TLS 1.3  --------------------------->|                  |
+|    |                   |                  |    |                  |
+|    |<-  ESNI Trans-  ->|                  |    |                  |
+|    |     formation     |                  |    |                  |
++----+                   +------------------+    +------------------+
+Client                   Client-Facing Server       Backend Server
 ~~~~
 {: #topology title="Topology"}
 
