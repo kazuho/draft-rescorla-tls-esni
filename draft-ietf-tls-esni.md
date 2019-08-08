@@ -115,21 +115,25 @@ comes from {{RFC8446}}; Section 3.
 This document is designed to operate in the topology shown below.
 
 ~~~~
-                +--------------------+       +---------------------+
-                |                    |       |                     |
-                |   2001:DB8::1111   |       |   2001:DB8::EEEE    |
-Client <------------------------------------>|                     |
-                | public.example.com |       | private.example.com |
-                |                    |       |                     |
-                +--------------------+       +---------------------+
-                 Client-Facing Server             Backend Server
+                          +-----------------+    +------------------+
+                          |                 |    |                  |
+                          | pub.example.com |    | priv.example.com |
+                          | (2001:DB8::111) |    | (2001:DB8::EEEE) |
+                          |                 |    |                  |
+       <---  TLS 1.3  -------------------------->|                  |
+Client                    |                 |    |                  |
+       <-  ESNI Trans-  ->|                 |    |                  |
+            formation     |                 |    |                  |
+                          +-----------------+    +------------------+
+                         Client-Facing Server       Backend Server
 ~~~~
 {: #topology title="Topology"}
 
-The client-facing server acts as a proxy between the client and the backend
-server. It unprotects the partially-encrypted ClientHello sent by the client
-(see {{esni-transformation}}), and forwards the restored ClientHello as well as
-the following TLS records to the backend server, which is identified during the
+Client sends a transformed ClientHello on the wire, that contains an encrypted
+server name (see {{esni-transformation}}). The client-facing server acts as a
+proxy between the client and the backend server, decrypting the server name sent
+by the client, and forwards the restored ClientHello as well as the the
+following TLS records to the backend server, which is identified during the
 inverse transformation. The client-facing server is also responsible for
 providing the up-to-date ESNI keys should there be a mismatch (see
 {{server-behavior}}).
