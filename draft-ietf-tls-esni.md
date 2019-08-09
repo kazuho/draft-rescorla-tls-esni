@@ -141,7 +141,7 @@ providing the up-to-date ESNI keys should there be a mismatch (see
 
 The backend server can be a stock TLS 1.3 server.
 
-The client-facing server and the backend server can be collocated. When they are
+The client-facing server and the backend server can be colocated. When they are
 not, the communication between these two servers MUST be encrypted (e.g., by
 using VPN) so that it would be unobservable by a third party.
 
