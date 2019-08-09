@@ -493,7 +493,7 @@ The client then builds the first ClientHello, that has the following properties:
   "encrypted_server_name" extension carrying the ClientEncryptedSNI structure of
   type `esni_parameters`.
 
-The client MUST NOT send a "cached_info" extension {{!RFC7924}} with a
+The client MUST NOT include a "cached_info" extension {{!RFC7924}} with a
 CachedObject entry whose CachedInformationType is "cert".
 
 A ClientHello generated in response to a HelloRetryRequest MUST contain a
