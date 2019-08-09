@@ -794,9 +794,11 @@ The backend server SHOULD pad the Certificate message, via padding at the record
 layer, such that its length equals the size of the largest possible Certificate
 message covered by the same ESNI keys.
 
-The backend server SHOULD ignore the "encrypted_server_name" extension of type
+The backend server ignores the "encrypted_server_name" extension of type
 `esni_parameters`, as the purpose of this parameters is to derive the handshake
-traffic secret from a handshake transcript invisible to an observer.
+traffic secret from a handshake transcript invisible to an observer. Future
+extensions might use the values in particular ways, for example to authenticate
+the ServerHello.
 
 # Compatibility Issues
 
