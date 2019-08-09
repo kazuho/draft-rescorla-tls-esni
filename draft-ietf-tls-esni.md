@@ -618,6 +618,34 @@ traffic secret, as the server was unable to unwind the ESNI transformation. The
 client then proceeds with the handshake, authenticating for ESNIKeys.public_name
 as described in {{auth-public-name}}.
 
+### Authenticating for the public name {#auth-public-name}
+
+When the server cannot decrypt or does not process the "encrypted_server_name"
+extension, it continues with the handshake using the cleartext "server_name"
+extension instead (see {{server-behavior}}). Clients that offer ESNI then
+authenticate the connection with the public name, as follows:
+
+- If the server resumed a session or negotiated a session that did not use a
+  certificate for authentication, the client MUST abort the connection with an
+  "illegal_parameter" alert. This case is invalid because {{client-behavior}}
+  requires the client to only offer ESNI-established sessions, and
+  {{server-behavior}} requires the server to decline ESNI-established sessions
+  if it did not accept ESNI.
+
+- The client MUST verify that the certificate is valid for ESNIKeys.public_name.
+  If invalid, it MUST abort the connection with the appropriate alert.
+
+- If the server requests a client certificate, the client MUST respond with an
+  empty Certificate message, denoting no client certificate.
+
+Note that authenticating a connection for the public name does not authenticate
+it for the origin. The TLS implementation MUST NOT report such connections as
+successful to the application. It additionally MUST ignore all session tickets
+and session IDs presented by the server. These connections are only used to
+trigger retries, as described in {{handle-server-response}}. This may be
+implemented, for instance, by reporting a failed connection with a dedicated
+error code.
+
 After the handshake successfully concludes with the public name authenticated,
 the client MUST check if it has received an "encrypted_server_name" extension as
 part of EncryptedExtensions. If one was found, the client can regard that the
@@ -656,34 +684,6 @@ Clients SHOULD implement a limit on retries caused by the
 "encrypted_server_name" extension found in EncryptedExtensions or servers which
 do not acknowledge the "encrypted_server_name" extension. If the client does not
 retry in either scenario, it MUST report an error to the calling application.
-
-### Authenticating for the public name {#auth-public-name}
-
-When the server cannot decrypt or does not process the "encrypted_server_name"
-extension, it continues with the handshake using the cleartext "server_name"
-extension instead (see {{server-behavior}}). Clients that offer ESNI then
-authenticate the connection with the public name, as follows:
-
-- If the server resumed a session or negotiated a session that did not use a
-  certificate for authentication, the client MUST abort the connection with an
-  "illegal_parameter" alert. This case is invalid because {{client-behavior}}
-  requires the client to only offer ESNI-established sessions, and
-  {{server-behavior}} requires the server to decline ESNI-established sessions
-  if it did not accept ESNI.
-
-- The client MUST verify that the certificate is valid for ESNIKeys.public_name.
-  If invalid, it MUST abort the connection with the appropriate alert.
-
-- If the server requests a client certificate, the client MUST respond with an
-  empty Certificate message, denoting no client certificate.
-
-Note that authenticating a connection for the public name does not authenticate
-it for the origin. The TLS implementation MUST NOT report such connections as
-successful to the application. It additionally MUST ignore all session tickets
-and session IDs presented by the server. These connections are only used to
-trigger retries, as described in {{handle-server-response}}. This may be
-implemented, for instance, by reporting a failed connection with a dedicated
-error code.
 
 ### GREASE extensions {#grease-extensions}
 
