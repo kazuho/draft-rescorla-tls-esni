@@ -608,15 +608,15 @@ ESNI transformation as the handshake transcript, and the other using the
 ClientHello post ESNI transformation. One of these two traffic secrets is
 promoted to the handshake traffic secret using the following procedure.
 
-If the encrypted record can be sucessfully decrypted using the former traffic
-secret, it means that the server has received and recognized the protected
-server name. Then, that traffic secret is promoted to the handshake traffic
-secret, and the handshake continues accordingly.
+If the encrypted record can be sucessfully decrypted using the
+pre-transformation traffic secret, it means that the server has received and
+recognized the protected server name. Then, that traffic secret is promoted to
+the handshake traffic secret, and the handshake continues accordingly.
 
-Otherwise, the latter traffic secret is promoted to the handshake traffic
-secret, as the server was unable to unwind the ESNI transformation.  The client
-then proceeds with the handshake, authenticating for ESNIKeys.public_name as
-described in {{auth-public-name}}.
+Otherwise, the post-transformation traffic secret is promoted to the handshake
+traffic secret, as the server was unable to unwind the ESNI transformation. The
+client then proceeds with the handshake, authenticating for ESNIKeys.public_name
+as described in {{auth-public-name}}.
 
 After the handshake successfully concludes with the public name authenticated,
 the client MUST check if it has received an "encrypted_server_name" extension as
