@@ -583,7 +583,7 @@ TLS 1.3 AEAD:
 
 where ClientHelloPlaintext is the entire ClientHello to be transformed but the
 "server_name" extension being skipped.  Feeding the unencrypted part of the
-ClientHello in the AAD of AEAD-Encrypt binds the encrypted value to the prevents
+ClientHello in the AAD of AEAD-Encrypt binds the encrypted value and prevents
 cut-and-paste attacks.
 
 Note: future extensions may end up reusing the server's ESNIKeyShareEntry
