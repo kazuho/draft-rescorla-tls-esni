@@ -117,7 +117,8 @@ This document is designed to operate in the topology shown below.
 ~~~~
 +----+                   +------------------+    +------------------+
 |    |                   |                  |    |                  |
-|    |                   | pub.example.com  |    | priv.example.com |
+|    |                   |  client-facing.  |    |     backend.     |
+|    |                   |   example.com    |    |   example.com    |
 |    |                   | (2001:DB8::1111) |    | (2001:DB8::EEEE) |
 |    |                   |                  |    |                  |
 |    |<---  TLS 1.3  --------------------------->|                  |
